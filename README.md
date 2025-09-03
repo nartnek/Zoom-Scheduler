@@ -12,4 +12,3 @@ Automatically join and leave meetings because I know how it is you lazy bastard.
 python -m pip install -r requirements.txt
 ```
 3. Run `python .\main.py`
-4. Go to sleep lol
