@@ -1,0 +1,9 @@
+{
+  "join": "join_btn.png",
+  "code": "id_box.png",
+  "logo": "zoom_icon.png",
+  "passcode": "passcode_dbox.png",
+  "join-box": "join_dbox.png",
+  "leave": "leave_btn.png",
+  "leave0": "leave0_btn.png"
+}
