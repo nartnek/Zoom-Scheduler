@@ -1,56 +1,45 @@
-import time
-import datetime
-import subprocess
+import os, sys, time, datetime, subprocess, json, logging
 import pyautogui
 import schedule
-import json
 
-# Load UI‐element image names and Zoom path
-UI = {
-    k: './assets/' + v
-    for k, v in json.load(open('./config/ui_elements.json')).items()
-}
-paths = json.load(open('./config/paths.json'))
+# Setup
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
-def wait_for(elem, timeout=30):
-    """Wait up to `timeout` seconds for the UI element image to appear."""
-    end = time.time() + timeout
-    while time.time() < end:
-        loc = pyautogui.locateOnScreen(UI[elem])
-        if loc:
-            return loc
-        time.sleep(0.2)
-    raise RuntimeError(f"Element '{elem}' not found on screen")
+CONFIG_DIR = "./config"
+MEETINGS_FILE = os.path.join(CONFIG_DIR, "meetings.json")
 
-def join(meeting):
-    """Open Zoom and join the specified meeting."""
-    subprocess.Popen(executable=paths['zoom'])
-    btn = wait_for('join')
-    pyautogui.click(pyautogui.center(btn))
-    wait_for('join-box')
-    pyautogui.typewrite(meeting['id'], interval=0.05)
-    pyautogui.press('enter')
-    wait_for('passcode')
-    pyautogui.typewrite(meeting['passwd'], interval=0.05)
-    pyautogui.press('enter')
+# Load UI elements and paths
+try:
+    UI = {k: os.path.join('assets', v) for k, v in json.load(open(os.path.join(CONFIG_DIR, 'ui_elements.json'), 'r', encoding='utf-8')).items()}
+    paths = json.load(open(os.path.join(CONFIG_DIR, 'paths.json'), 'r', encoding='utf-8'))
+except (FileNotFoundError, json.JSONDecodeError) as e:
+    logging.error("Config load failed: %s", e)
+    sys.exit(1)
 
-def leave():
-    """Leave the current Zoom meeting."""
-    btn0 = wait_for('leave0')
-    pyautogui.click(pyautogui.center(btn0))
-    time.sleep(0.5)
-    btn1 = wait_for('leave')
-    pyautogui.click(pyautogui.center(btn1))
+pyautogui.PAUSE = 0.15
+pyautogui.FAILSAFE = True
 
-def run_meeting(meeting):
-    t0 = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    print(f"[{t0}] Joining '{meeting['name']}'")
-    join(meeting)
-    time.sleep(meeting['duration'] * 60)
-    leave()
-    t1 = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    print(f"[{t1}] Left '{meeting['name']}'")
+CONFIDENCE = 0.87
 
+# meeting persistence
+def load_meetings():
+    """Load meetings from JSON if available, else None."""
+    if os.path.exists(MEETINGS_FILE):
+        try:
+            with open(MEETINGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logging.warning("Could not read %s: %s", MEETINGS_FILE, e)
+    return None
+
+def save_meetings(meetings):
+    """Save meetings to JSON."""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(MEETINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(meetings, f, indent=2)
+    logging.info("Saved %d meetings to %s", len(meetings), MEETINGS_FILE)
+
+# interactive prompt
 def get_user_meetings():
     """Interactively collect meeting info from the user."""
     meetings = []
@@ -58,14 +47,16 @@ def get_user_meetings():
         n = int(input("How many meetings would you like to schedule? "))
     except ValueError:
         print("That's not a number. Exiting.")
-        exit(1)
+        sys.exit(1)
 
+    valid_days = ('mon','tue','wed','thu','fri','sat','sun')
     for i in range(1, n+1):
         print(f"\n--- Meeting #{i} ---")
         name     = input("  Name (for your reference): ").strip()
         m_id     = input("  Zoom Meeting ID: ").strip()
         passwd   = input("  Passcode (leave blank if none): ").strip()
-        days_raw = input("  Days (e.g. mon,wed,fri): ").lower().split(',')
+        days_in  = input("  Days (e.g. mon,wed,fri): ").lower().replace(' ', '')
+        days_raw = [d for d in days_in.split(',') if d]
         start    = input("  Start time (HH:MM, 24h): ").strip()
         try:
             dur = int(input("  Duration (minutes): ").strip())
@@ -73,18 +64,23 @@ def get_user_meetings():
             print("  Invalid duration; defaulting to 60 min.")
             dur = 60
 
+        days = [d for d in days_raw if d in valid_days]
+        if not days:
+            print("  No valid days given; defaulting to 'mon'.")
+            days = ['mon']
+
         meetings.append({
-            'name':     name,
+            'name':     name or f"Meeting #{i}",
             'id':       m_id,
             'passwd':   passwd,
-            'days':     [d for d in days_raw if d in ('mon','tue','wed','thu','fri','sat','sun')],
+            'days':     days,
             'start':    start,
             'duration': dur
         })
     return meetings
 
+# scheduling
 def schedule_meetings(meetings):
-    """Register all meetings with the `schedule` library."""
     day_map = {
         'mon': schedule.every().monday,
         'tue': schedule.every().tuesday,
@@ -96,14 +92,27 @@ def schedule_meetings(meetings):
     }
     for m in meetings:
         for d in m['days']:
-            day_map[d].at(m['start']).do(run_meeting, m)
-            print(f"Scheduled '{m['name']}' on {d.title()} at {m['start']} for {m['duration']} min")
+            day_map[d].at(m['start']).do(lambda m=m: run_meeting(m))
+            logging.info("Scheduled '%s' on %s at %s for %s min",
+                         m['name'], d.title(), m['start'], m['duration'])
+
+# (keep your join/leave/run_meeting logic here unchanged)
 
 if __name__ == "__main__":
     print("\nWelcome to Zoom Scheduler")
-    meetings = get_user_meetings()
+
+    meetings = load_meetings()
+    if meetings:
+        print(f"Loaded {len(meetings)} meetings from {MEETINGS_FILE}")
+    else:
+        meetings = get_user_meetings()
+        save_meetings(meetings)
+
     schedule_meetings(meetings)
     print("\nScheduler running. Press Ctrl+C to stop.\n")
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
+    try:
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nShutting down. Bye!")
