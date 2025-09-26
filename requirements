@@ -1,0 +1,4 @@
+pyautogui
+schedule
+opencv-python   # for image match confidence
+pillow          # pyautogui dependency (images/screenshots)
