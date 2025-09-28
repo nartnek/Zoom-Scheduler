@@ -96,7 +96,7 @@ def schedule_meetings(meetings):
             logging.info("Scheduled '%s' on %s at %s for %s min",
                          m['name'], d.title(), m['start'], m['duration'])
 
-# (keep your join/leave/run_meeting logic here unchanged)
+
 
 if __name__ == "__main__":
     print("\nWelcome to Zoom Scheduler")
@@ -116,3 +116,4 @@ if __name__ == "__main__":
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nShutting down. Bye!")
+
